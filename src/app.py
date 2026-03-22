@@ -46,8 +46,14 @@ def scrape():
         logger.info("URL inválida: %s - %s", url, error_msg)
         return render_template("index.html", error=error_msg)
 
+    # Capturar cookies e headers do navegador do usuário
+    user_cookies = {k: v for k, v in request.cookies.items()}
+    user_headers = {k: v for k, v in request.headers if k.lower() not in (
+        "host", "content-length", "content-type", "connection",
+    )}
+
     logger.info("URL válida, iniciando crawler para: %s", url)
-    result = get_product_data(url)
+    result = get_product_data(url, cookies=user_cookies, headers=user_headers)
 
     if "error" in result:
         logger.error("Crawler retornou erro para URL %s: %s", url, result["error"])

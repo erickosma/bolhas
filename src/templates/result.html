@@ -4,28 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Resultado — Product Crawler</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <h1>Product Crawler</h1>
-    {% if error %}
-    <p class="error">{{ error }}</p>
-    {% endif %}
-    {% if product %}
-    <div class="product">
-        <h2>{{ product.title }}</h2>
-        {% if product.price is string %}
-        <p class="price">{{ product.price }}</p>
-        {% else %}
-        <div class="price-block">
-            {% for line in product.price %}
-            <p class="price-line">{{ line }}</p>
-            {% endfor %}
+<body class="bg-gray-100 min-h-screen flex items-center justify-center px-4">
+    <div class="w-full max-w-md flex flex-col gap-4">
+        <h1 class="text-3xl font-bold text-center text-gray-800">Product Crawler</h1>
+
+        {% if error %}
+        <p class="p-3 bg-red-50 text-red-700 rounded-lg border border-red-200">{{ error }}</p>
+        {% endif %}
+
+        {% if product %}
+        <div class="bg-white rounded-lg shadow p-6 flex flex-col gap-3">
+            <h2 class="text-xl font-semibold text-gray-800">{{ product.title }}</h2>
+
+            {% if product.images %}
+            <div class="flex gap-2 overflow-x-auto py-2">
+                {% for img_url in product.images %}
+                <img src="{{ img_url }}" alt="Imagem do produto" class="w-48 h-48 object-contain rounded border border-gray-200 flex-shrink-0" loading="lazy">
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <p class="text-lg font-bold text-green-700">{{ product.price }}</p>
+
+            <p class="text-gray-600 leading-relaxed">{{ product.description }}</p>
         </div>
         {% endif %}
-        <p class="description">{{ product.description }}</p>
+
+        <a href="/" class="text-blue-600 hover:underline text-center">Voltar</a>
     </div>
-    {% endif %}
-    <a href="/">Voltar</a>
 </body>
 </html>

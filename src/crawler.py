@@ -3,17 +3,17 @@ Módulo de extração de dados de produtos via Playwright.
 
 Expõe a função get_product_data(url) que gerencia o ciclo de vida
 do navegador, executa navegação simulada e retorna os dados extraídos.
-
-Requisitos: 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 4.4, 4.5,
-            5.1, 5.2, 6.1, 6.2, 6.3, 9.1, 9.2, 9.3, 10.1, 10.2
 """
 
 import logging
-import random
 import re
 import time
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import (
+    sync_playwright,
+    TimeoutError as PlaywrightTimeoutError,
+    ViewportSize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,29 @@ DESCRIPTION_SELECTORS = [
     "meta[name='description']",
 ]
 
+IMAGE_SELECTORS = [
+    "#landingImage",                        # Amazon
+    "#imgBlkFront",                         # Amazon (livros)
+    "[data-testid='product-image'] img",
+    ".product-image img",
+    ".product-gallery img",
+    "#product-image img",
+    ".gallery-image img",
+    "[data-zoom-image]",
+    "img.product-image",
+    "img[data-src]",
+]
+
+
+# Seletores comuns de modais de cookies para aceitar automaticamente
+COOKIE_ACCEPT_SELECTORS = [
+    "#sp-cc-accept",           # Amazon
+    "#onetrust-accept-btn-handler",
+    "[data-testid='cookie-accept']",
+    "button[id*='cookie']",
+    "button[id*='accept']",
+]
+
 
 def _extract_text(page, selectors: list[str]) -> str:
     """
@@ -55,7 +78,6 @@ def _extract_text(page, selectors: list[str]) -> str:
     """
     for selector in selectors:
         try:
-            # Tratamento especial para meta tags
             if selector.startswith("meta["):
                 element = page.query_selector(selector)
                 if element:
@@ -74,23 +96,20 @@ def _extract_text(page, selectors: list[str]) -> str:
     return ""
 
 
-def _extract_price_fallback(page) -> list[str]:
+def _extract_price_fallback(page) -> str:
     """
     Fallback para extração de preço quando os seletores CSS não encontram nada.
     Busca padrões de preço brasileiro (R$) no texto da página e retorna
-    uma lista de linhas de preço contextualizadas.
-
-    Ex: ["R$237,40", "à vista no Pix (5% off)", "ou R$ 249,90 em até 6x de R$ 41,65"]
+    as linhas de preço concatenadas com " | " como separador.
     """
     try:
         body_text = page.inner_text("body")
     except Exception:
-        return []
+        return ""
 
     if not body_text:
-        return []
+        return ""
 
-    # Quebrar o texto em linhas e encontrar o bloco com preços R$
     lines = [line.strip() for line in body_text.splitlines() if line.strip()]
 
     price_lines = []
@@ -103,8 +122,6 @@ def _extract_price_fallback(page) -> list[str]:
             in_price_block = True
             price_lines.append(line)
         elif in_price_block:
-            # Continuar capturando linhas do bloco de preço
-            # (à vista, parcelas, cupom, etc.)
             if has_price or re.search(
                 r"(à vista|pix|parcela|cupom|juros|off|em até|pagamento|de:|por:?)",
                 line,
@@ -112,121 +129,230 @@ def _extract_price_fallback(page) -> list[str]:
             ):
                 price_lines.append(line)
             else:
-                # Fim do bloco de preço
                 break
 
-    return price_lines if price_lines else []
+    return " | ".join(price_lines) if price_lines else ""
 
 
+def _extract_images(page) -> list[str]:
+    """
+    Extrai URLs das imagens principais do produto.
+    Tenta seletores específicos primeiro, depois faz fallback
+    para imagens grandes na página. Retorna lista de URLs únicas.
+    """
+    image_urls: list[str] = []
+    seen: set[str] = set()
+
+    def _add_url(url: str) -> None:
+        if not url or url in seen:
+            return
+        # Ignorar placeholders, ícones e imagens tiny
+        if any(skip in url.lower() for skip in ("placeholder", "icon", "sprite", "1x1", "pixel", "blank")):
+            return
+        seen.add(url)
+        image_urls.append(url)
+
+    # 1. Tentar seletores específicos de produto
+    for selector in IMAGE_SELECTORS:
+        try:
+            elements = page.query_selector_all(selector)
+            for el in elements:
+                # Prioridade: data-zoom-image > data-old-hires > data-src > src
+                for attr in ("data-zoom-image", "data-old-hires", "data-src", "src"):
+                    src = el.get_attribute(attr)
+                    if src and src.startswith("http"):
+                        _add_url(src)
+                        break
+        except Exception:
+            continue
+
+    # 2. Fallback: imagens grandes (naturalWidth > 150) na página
+    if not image_urls:
+        try:
+            large_imgs = page.evaluate("""
+                () => {
+                    const imgs = document.querySelectorAll('img');
+                    const urls = [];
+                    for (const img of imgs) {
+                        if (img.naturalWidth > 150 && img.naturalHeight > 150) {
+                            const src = img.dataset.src || img.src;
+                            if (src && src.startsWith('http')) urls.push(src);
+                        }
+                    }
+                    return urls;
+                }
+            """)
+            for src in large_imgs:
+                _add_url(src)
+        except Exception:
+            pass
+
+    logger.debug("Extraídas %d imagens do produto", len(image_urls))
+    return image_urls
+
+
+def _dismiss_cookie_modal(page) -> None:
+    """Tenta aceitar modais de cookies comuns sem bloquear."""
+    for selector in COOKIE_ACCEPT_SELECTORS:
+        try:
+            btn = page.query_selector(selector)
+            if btn and btn.is_visible():
+                btn.click()
+                logger.debug("Modal de cookies aceito via: %s", selector)
+                return
+        except Exception:
+            continue
 
 
 def _simulate_navigation(page) -> None:
     """
-    Simula navegação humana com scroll e delays para garantir
-    carregamento de conteúdo lazy-loaded.
+    Simula navegação humana com scroll suave e delays
+    para garantir carregamento de conteúdo lazy-loaded.
     """
-    # Scroll gradual pela página
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+    page.evaluate("window.scrollTo({top: document.body.scrollHeight / 2, behavior: 'smooth'})")
     time.sleep(1)
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.evaluate("window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'})")
     time.sleep(1)
-    # Volta ao topo
-    page.evaluate("window.scrollTo(0, 0)")
+    page.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
     time.sleep(0.5)
 
 
-def get_product_data(url: str) -> dict:
+def get_product_data(
+    url: str,
+    cookies: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict:
     """
     Função principal do crawler.
 
-    Parâmetros:
-        url: URL do produto (já validada)
+    Args:
+        url: URL do produto a ser extraído.
+        cookies: Cookies do navegador do usuário (chave: valor).
+        headers: Headers HTTP do navegador do usuário.
 
     Retorna:
-        dict com chaves "title", "price", "description" em caso de sucesso.
-        dict com chave "error" em caso de falha.
+        dict com chaves "title", "price", "description" (todos str) em caso de sucesso.
+        dict com chave "error" e "error_type" em caso de falha.
+        error_type: "timeout", "connection", "extraction", "unknown"
     """
-    logger.info("Iniciando extração de dados para URL: %s", url)
+    logger.info("Iniciando extração para: %s", url)
 
+    playwright_instance = None
     browser = None
     context = None
-    playwright_instance = None
+    page = None
+
     try:
         playwright_instance = sync_playwright().start()
-        browser = playwright_instance.chromium.launch(headless=False)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
+        logger.debug("Playwright iniciado")
+
+        browser = playwright_instance.chromium.launch(headless=True)
+        logger.debug("Browser Chromium lançado (headless)")
+
+        # Mesclar headers do usuário com user-agent padrão
+        extra_headers = dict(headers) if headers else {}
+        default_ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
         )
+
+        context = browser.new_context(
+            user_agent=extra_headers.pop("User-Agent", extra_headers.pop("user-agent", default_ua)),
+            viewport=ViewportSize(width=1920, height=1080),
+            extra_http_headers=extra_headers if extra_headers else None,
+        )
+
+        # Injetar cookies do usuário no contexto do browser
+        if cookies:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain = parsed.hostname or ""
+            pw_cookies: list[dict] = [
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": "/",
+                    "httpOnly": False,
+                    "secure": url.startswith("https"),
+                    "sameSite": "Lax",
+                }
+                for name, value in cookies.items()
+            ]
+            context.add_cookies(pw_cookies)  # type: ignore[arg-type]
+            logger.debug("Injetados %d cookies do usuário para domínio %s", len(pw_cookies), domain)
+
         page = context.new_page()
 
-        # Click aleatório antes de carregar a página (simula interação humana)
-        page.goto("about:blank")
-        rx = random.randint(100, 800)
-        ry = random.randint(100, 400)
-        page.mouse.click(rx, ry)
+        # Navegar com domcontentloaded (mais confiável que networkidle)
+        page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
+        # Aguardar estabilização adicional do DOM
+        page.wait_for_load_state("load", timeout=TIMEOUT_MS)
+        logger.debug("Página carregada: %s", url)
 
-        # Navegar até a URL com timeout e esperar networkidle
-        page.goto(url, timeout=TIMEOUT_MS, wait_until="networkidle")
-
-        # Aceitar cookies se modal aparecer (comum na Amazon)
-        try:
-            page.click("#sp-cc-accept", timeout=3000)
-        except Exception:
-            pass
+        # Aceitar cookies se modal aparecer
+        _dismiss_cookie_modal(page)
 
         # Navegação simulada (scroll + delays)
         _simulate_navigation(page)
 
-        # Click aleatório pós-carregamento para simular interação
-        rx = random.randint(200, 900)
-        ry = random.randint(200, 500)
-        page.mouse.click(rx, ry)
-        time.sleep(0.5)
-
         # Extrair dados via seletores
         title = _extract_text(page, TITLE_SELECTORS)
         price = _extract_text(page, PRICE_SELECTORS)
+
         if not price:
             logger.info("Seletores CSS não encontraram preço, usando fallback regex")
-            price_lines = _extract_price_fallback(page)
-            price = price_lines if price_lines else ""
+            price = _extract_price_fallback(page)
+
         description = _extract_text(page, DESCRIPTION_SELECTORS)
+
+        images = _extract_images(page)
 
         result = {
             "title": title,
             "price": price,
             "description": description,
+            "images": images,
         }
 
-        logger.info("Extração concluída com sucesso para URL: %s", url)
+        if not title and not price and not description:
+            logger.warning("Nenhum dado extraído para: %s", url)
+            return {
+                "error": "Não foi possível extrair dados desta página",
+                "error_type": "extraction",
+            }
+
+        logger.info("Extração concluída com sucesso para: %s", url)
         return result
 
     except PlaywrightTimeoutError:
-        error_msg = "Timeout: a página não carregou em 60 segundos"
-        logger.error("Erro de timeout ao acessar URL: %s - %s", url, error_msg)
-        return {"error": error_msg}
+        msg = "Timeout: a página não carregou em 60 segundos"
+        logger.error("Timeout ao acessar: %s", url)
+        return {"error": msg, "error_type": "timeout"}
 
     except Exception as exc:
         error_str = str(exc).lower()
-        if "net::err" in error_str or "connection" in error_str or "dns" in error_str:
-            error_msg = "Falha de conexão: não foi possível acessar a URL"
-            logger.error("Erro de conexão ao acessar URL: %s - %s", url, error_msg)
-            return {"error": error_msg}
+        if any(k in error_str for k in ("net::err", "connection", "dns", "econnrefused")):
+            msg = "Falha de conexão: não foi possível acessar a URL"
+            logger.error("Erro de conexão para %s: %s", url, exc)
+            return {"error": msg, "error_type": "connection"}
 
-        error_msg = "Erro inesperado ao processar a página"
-        logger.error(
-            "Erro inesperado ao acessar URL: %s - %s: %s",
-            url,
-            type(exc).__name__,
-            exc,
-        )
-        return {"error": error_msg}
+        msg = "Erro inesperado ao processar a página"
+        logger.error("Erro inesperado para %s: %s: %s", url, type(exc).__name__, exc)
+        return {"error": msg, "error_type": "unknown"}
 
     finally:
-        if context:
-            context.close()
-        if browser:
-            browser.close()
+        for resource, name in [(page, "page"), (context, "context"), (browser, "browser")]:
+            if resource:
+                try:
+                    resource.close()
+                    logger.debug("%s fechado", name)
+                except Exception as e:
+                    logger.warning("Erro ao fechar %s: %s", name, e)
         if playwright_instance:
-            playwright_instance.stop()
+            try:
+                playwright_instance.stop()
+                logger.debug("Playwright encerrado")
+            except Exception as e:
+                logger.warning("Erro ao encerrar Playwright: %s", e)

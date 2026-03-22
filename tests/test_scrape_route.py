@@ -49,7 +49,7 @@ class TestScrapeRouteValidUrl:
             assert "Descrição do produto teste".encode() in resp.data
 
     def test_post_valid_url_crawler_error_shows_error(self, client):
-        mock_error = {"error": "Timeout: a página não carregou em 30 segundos"}
+        mock_error = {"error": "Timeout: a página não carregou em 60 segundos"}
         with patch("src.app.get_product_data", return_value=mock_error):
             resp = client.post("/scrape", data={"url": "https://example.com/slow"})
             assert resp.status_code == 200
