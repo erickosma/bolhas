@@ -1,7 +1,7 @@
 import logging
 from flask import Flask, render_template, request
 
-from crawler import get_product_data
+from src.crawler import get_product_data
 
 app = Flask(__name__)
 

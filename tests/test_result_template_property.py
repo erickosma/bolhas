@@ -8,7 +8,7 @@ from markupsafe import escape
 
 from hypothesis import given, settings, strategies as st
 
-from app import app
+from src.app import app
 
 
 # --- Propriedade 4 ---

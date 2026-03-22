@@ -15,4 +15,4 @@ playwright install chromium
 
 echo ""
 echo "==> Iniciando aplicação..."
-python app.py
+python -m src.app

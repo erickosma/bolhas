@@ -6,7 +6,7 @@ Requisitos: 2.1, 2.2, 2.3, 7.1
 
 import pytest
 
-from app import app, validate_url
+from src.app import app, validate_url
 
 
 class TestValidateUrl:

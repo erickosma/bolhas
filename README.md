@@ -14,25 +14,27 @@ Aplicação web para extração de dados de produtos (título, preço e descriç
 ## Estrutura do Projeto
 
 ```
-app.py                  # Backend Flask (rotas e validação)
-crawler.py              # Módulo de extração via Playwright
-templates/
-  index.html            # Página inicial com formulário
-  result.html           # Página de resultados
-static/
-  style.css             # Estilos
-test_app.py             # Testes unitários
-test_validate_url_property.py
-test_product_data_property.py
-test_result_template_property.py
-test_scrape_route.py
+src/
+  app.py                # Backend Flask (rotas e validação)
+  crawler.py            # Módulo de extração via Playwright
+  templates/
+    index.html          # Página inicial com formulário
+    result.html         # Página de resultados
+  static/
+    style.css           # Estilos
+tests/
+  test_app.py           # Testes unitários
+  test_validate_url_property.py
+  test_product_data_property.py
+  test_result_template_property.py
+  test_scrape_route.py
 ```
 
 ## Como Executar
 
 ```bash
 # 1. Criar ambiente virtual
-python -m venv venv
+python3.13 -m venv venv
 
 # 2. Ativar o ambiente
 # macOS/Linux:
@@ -43,13 +45,13 @@ venv\Scripts\activate
 .\venv\Scripts\Activate.ps1
 
 # 3. Instalar dependências
-pip install flask playwright pytest hypothesis
+pip install -r requirements.txt
 
 # 4. Instalar navegador do Playwright
 playwright install chromium
 
 # 5. Rodar a aplicação
-python app.py
+python -m src.app
 ```
 
 A aplicação estará disponível em `http://127.0.0.1:5000`.
@@ -57,5 +59,5 @@ A aplicação estará disponível em `http://127.0.0.1:5000`.
 ## Como Testar
 
 ```bash
-pytest -v
+pytest tests/ -v
 ```

@@ -6,7 +6,7 @@ Property-based test for URL validation.
 
 from hypothesis import given, settings, strategies as st
 
-from app import validate_url
+from src.app import validate_url
 
 
 @settings(max_examples=200)

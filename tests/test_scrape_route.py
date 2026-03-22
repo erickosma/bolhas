@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import app
+from src.app import app
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestScrapeRouteValidUrl:
             "price": "R$ 99,90",
             "description": "Descrição do produto teste",
         }
-        with patch("app.get_product_data", return_value=mock_data):
+        with patch("src.app.get_product_data", return_value=mock_data):
             resp = client.post("/scrape", data={"url": "https://example.com/product"})
             assert resp.status_code == 200
             assert b"Produto Teste" in resp.data
@@ -50,7 +50,7 @@ class TestScrapeRouteValidUrl:
 
     def test_post_valid_url_crawler_error_shows_error(self, client):
         mock_error = {"error": "Timeout: a página não carregou em 30 segundos"}
-        with patch("app.get_product_data", return_value=mock_error):
+        with patch("src.app.get_product_data", return_value=mock_error):
             resp = client.post("/scrape", data={"url": "https://example.com/slow"})
             assert resp.status_code == 200
             assert "Timeout".encode() in resp.data
@@ -65,7 +65,7 @@ class TestResultPageBackLink:
             "price": "R$ 10",
             "description": "Desc",
         }
-        with patch("app.get_product_data", return_value=mock_data):
+        with patch("src.app.get_product_data", return_value=mock_data):
             resp = client.post("/scrape", data={"url": "https://example.com"})
             assert resp.status_code == 200
             assert b'href="/"' in resp.data

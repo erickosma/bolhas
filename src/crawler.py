@@ -9,6 +9,7 @@ Requisitos: 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 4.4, 4.5,
 """
 
 import logging
+import random
 import re
 import time
 
@@ -16,7 +17,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_MS = 30000  # 30 segundos
+TIMEOUT_MS = 60000  # 60 segundos
 
 TITLE_SELECTORS = [
     "h1.product-title",
@@ -148,20 +149,40 @@ def get_product_data(url: str) -> dict:
     logger.info("Iniciando extração de dados para URL: %s", url)
 
     browser = None
+    context = None
     playwright_instance = None
     try:
         playwright_instance = sync_playwright().start()
         browser = playwright_instance.chromium.launch(headless=False)
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+        )
+        page = context.new_page()
 
-        # Navegar até a URL com timeout
-        page.goto(url, timeout=TIMEOUT_MS, wait_until="domcontentloaded")
+        # Click aleatório antes de carregar a página (simula interação humana)
+        page.goto("about:blank")
+        rx = random.randint(100, 800)
+        ry = random.randint(100, 400)
+        page.mouse.click(rx, ry)
 
-        # Aguardar carregamento completo do DOM
-        page.wait_for_load_state("domcontentloaded")
+        # Navegar até a URL com timeout e esperar networkidle
+        page.goto(url, timeout=TIMEOUT_MS, wait_until="networkidle")
+
+        # Aceitar cookies se modal aparecer (comum na Amazon)
+        try:
+            page.click("#sp-cc-accept", timeout=3000)
+        except Exception:
+            pass
 
         # Navegação simulada (scroll + delays)
         _simulate_navigation(page)
+
+        # Click aleatório pós-carregamento para simular interação
+        rx = random.randint(200, 900)
+        ry = random.randint(200, 500)
+        page.mouse.click(rx, ry)
+        time.sleep(0.5)
 
         # Extrair dados via seletores
         title = _extract_text(page, TITLE_SELECTORS)
@@ -182,7 +203,7 @@ def get_product_data(url: str) -> dict:
         return result
 
     except PlaywrightTimeoutError:
-        error_msg = "Timeout: a página não carregou em 30 segundos"
+        error_msg = "Timeout: a página não carregou em 60 segundos"
         logger.error("Erro de timeout ao acessar URL: %s - %s", url, error_msg)
         return {"error": error_msg}
 
@@ -203,6 +224,8 @@ def get_product_data(url: str) -> dict:
         return {"error": error_msg}
 
     finally:
+        if context:
+            context.close()
         if browser:
             browser.close()
         if playwright_instance:
