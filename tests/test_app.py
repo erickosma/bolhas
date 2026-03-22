@@ -44,6 +44,7 @@ class TestIndexRoute:
     @pytest.fixture
     def client(self):
         app.config["TESTING"] = True
+        app.config["WTF_CSRF_ENABLED"] = False
         with app.test_client() as client:
             yield client
 
