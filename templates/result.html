@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultado — Product Crawler</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Product Crawler</h1>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if product %}
+    <div class="product">
+        <h2>{{ product.title }}</h2>
+        {% if product.price is string %}
+        <p class="price">{{ product.price }}</p>
+        {% else %}
+        <div class="price-block">
+            {% for line in product.price %}
+            <p class="price-line">{{ line }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <p class="description">{{ product.description }}</p>
+    </div>
+    {% endif %}
+    <a href="/">Voltar</a>
+</body>
+</html>
